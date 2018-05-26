@@ -1,12 +1,10 @@
-# the hdp class in python
-# implements the truncated hdp model
-# by chongw@cs.princeton.edu
-
+"""
+online hdp with lazy update
+part of code is adapted from Matt's online lda code
+"""
 import numpy as np
 import scipy.special as sp
-import os, sys, math, time
-import utils
-from corpus import document, corpus, parse_line
+from onlinehdp import utils
 
 import random
 
@@ -14,15 +12,25 @@ meanchangethresh = 0.00001
 random_seed = 999931111
 np.random.seed(random_seed)
 random.seed(random_seed)
+min_adding_noise_point = 10
+min_adding_noise_ratio = 1
+mu0 = 0.3
+rhot_bound = 0.0
 
 
 def dirichlet_expectation(alpha):
-    if (len(alpha.shape) == 1):
-        return (sp.psi(alpha) - sp.psi(np.sum(alpha)))
-    return (sp.psi(alpha) - sp.psi(np.sum(alpha, 1))[:, np.newaxis])
+    """
+    For a vector theta ~ Dir(alpha), computes E[log(theta)] given alpha.
+    """
+    if len(alpha.shape) == 1:
+        return sp.psi(alpha) - sp.psi(np.sum(alpha))
+    return sp.psi(alpha) - sp.psi(np.sum(alpha, 1))[:, np.newaxis]
 
 
 def expect_log_sticks(sticks):
+    """
+    For stick-breaking hdp, this returns the E[log(sticks)] 
+    """
     dig_sum = sp.psi(np.sum(sticks, 0))
     ElogW = sp.psi(sticks[0]) - dig_sum
     Elog1_W = sp.psi(sticks[1]) - dig_sum
@@ -37,7 +45,6 @@ def expect_log_sticks(sticks):
 def lda_e_step_half(doc, alpha, Elogbeta, split_ratio):
 
     n_train = int(doc.length * split_ratio)
-    n_test = doc.length - n_train
 
     # split the document
     words_train = doc.words[:n_train]
@@ -48,27 +55,29 @@ def lda_e_step_half(doc, alpha, Elogbeta, split_ratio):
     gamma = np.ones(len(alpha))
     expElogtheta = np.exp(dirichlet_expectation(gamma))
 
-    expElogbeta = np.exp(Elogbeta[:, words_train])
-    phinorm = np.dot(expElogtheta, expElogbeta) + 1e-100
+    expElogbeta = np.exp(Elogbeta)
+    expElogbeta_train = expElogbeta[:, words_train]
+    phinorm = np.dot(expElogtheta, expElogbeta_train) + 1e-100
     counts = np.array(counts_train)
-    iter = 0
+    iteration = 0
     max_iter = 100
-    while iter < max_iter:
+    while iteration < max_iter:
         lastgamma = gamma
-        iter += 1
-        gamma = alpha + expElogtheta * np.dot(counts / phinorm, expElogbeta.T)
+        iteration += 1
+        gamma = alpha + expElogtheta * np.dot(counts / phinorm,
+                                              expElogbeta_train.T)
         Elogtheta = dirichlet_expectation(gamma)
         expElogtheta = np.exp(Elogtheta)
-        phinorm = np.dot(expElogtheta, expElogbeta) + 1e-100
+        phinorm = np.dot(expElogtheta, expElogbeta_train) + 1e-100
         meanchange = np.mean(abs(gamma - lastgamma))
-        if (meanchange < meanchangethresh):
+        if meanchange < meanchangethresh:
             break
     gamma = gamma / np.sum(gamma)
     counts = np.array(counts_test)
-    expElogbeta = np.exp(Elogbeta[:, words_test])
-    score = np.sum(counts * np.log(np.dot(gamma, expElogbeta) + 1e-100))
+    expElogbeta_test = expElogbeta[:, words_test]
+    score = np.sum(counts * np.log(np.dot(gamma, expElogbeta_test) + 1e-100))
 
-    return (score, np.sum(counts), gamma)
+    return score, np.sum(counts), gamma
 
 
 def lda_e_step_split(doc, alpha, beta, max_iter=100):
@@ -87,17 +96,16 @@ def lda_e_step_split(doc, alpha, beta, max_iter=100):
     betad = beta[:, words_train]
     phinorm = np.dot(expElogtheta, betad) + 1e-100
     counts = np.array(counts_train)
-    iter = 0
-    while iter < max_iter:
+    iteration = 0
+    while iteration < max_iter:
         lastgamma = gamma
-        iter += 1
-        likelihood = 0.0
+        iteration += 1
         gamma = alpha + expElogtheta * np.dot(counts / phinorm, betad.T)
         Elogtheta = dirichlet_expectation(gamma)
         expElogtheta = np.exp(Elogtheta)
         phinorm = np.dot(expElogtheta, betad) + 1e-100
         meanchange = np.mean(abs(gamma - lastgamma))
-        if (meanchange < meanchangethresh):
+        if meanchange < meanchangethresh:
             break
 
     gamma = gamma / np.sum(gamma)
@@ -105,26 +113,25 @@ def lda_e_step_split(doc, alpha, beta, max_iter=100):
     betad = beta[:, words_test]
     score = np.sum(counts * np.log(np.dot(gamma, betad) + 1e-100))
 
-    return (score, np.sum(counts), gamma)
+    return score, np.sum(counts), gamma
 
 
-def lda_e_step(doc, alpha, Elogbeta, max_iter=100):
+def lda_e_step(doc, alpha, beta, max_iter=100):
     gamma = np.ones(len(alpha))
     expElogtheta = np.exp(dirichlet_expectation(gamma))
-    expElogbeta = Elogbeta[:, doc.words]
-    phinorm = np.dot(expElogtheta, expElogbeta) + 1e-100
+    betad = beta[:, doc.words]
+    phinorm = np.dot(expElogtheta, betad) + 1e-100
     counts = np.array(doc.counts)
-    iter = 0
-    while iter < max_iter:
+    iteration = 0
+    while iteration < max_iter:
         lastgamma = gamma
-        iter += 1
-        likelihood = 0.0
-        gamma = alpha + expElogtheta * np.dot(counts / phinorm, expElogbeta.T)
+        iteration += 1
+        gamma = alpha + expElogtheta * np.dot(counts / phinorm, betad.T)
         Elogtheta = dirichlet_expectation(gamma)
         expElogtheta = np.exp(Elogtheta)
-        phinorm = np.dot(expElogtheta, expElogbeta) + 1e-100
+        phinorm = np.dot(expElogtheta, betad) + 1e-100
         meanchange = np.mean(abs(gamma - lastgamma))
-        if (meanchange < meanchangethresh):
+        if meanchange < meanchangethresh:
             break
 
     likelihood = np.sum(counts * np.log(phinorm))
@@ -132,96 +139,206 @@ def lda_e_step(doc, alpha, Elogbeta, max_iter=100):
     likelihood += np.sum(sp.gammaln(gamma) - sp.gammaln(alpha))
     likelihood += sp.gammaln(np.sum(alpha)) - sp.gammaln(np.sum(gamma))
 
-    return (likelihood, gamma)
-
-
-class hdp_hyperparameter:
-    def __init__(self, alpha_a, alpha_b, gamma_a, gamma_b, hyper_opt=False):
-        self.m_alpha_a = alpha_a
-        self.m_alpha_b = alpha_b
-        self.m_gamma_a = gamma_a
-        self.m_gamma_b = gamma_b
-        self.m_hyper_opt = hyper_opt
+    return likelihood, gamma
 
 
 class suff_stats:
-    def __init__(self, T, size_vocab):
+    def __init__(self, T, Wt, Dt):
+        self.m_batchsize = Dt
         self.m_var_sticks_ss = np.zeros(T)
-        self.m_var_beta_ss = np.zeros((T, size_vocab))
+        self.m_var_beta_ss = np.zeros((T, Wt))
 
     def set_zero(self):
         self.m_var_sticks_ss.fill(0.0)
         self.m_var_beta_ss.fill(0.0)
 
 
-class hdp:
-    ''' hdp model using john's new stick breaking'''
+class online_hdp:
+    ''' hdp model using stick breaking'''
 
-    def __init__(self, T, K, D, size_vocab, eta, hdp_hyperparam):
-        ''' this follows the convention of the HDP paper'''
-        ''' gamma, first level concentration '''
-        ''' alpha, second level concentration '''
-        ''' eta, the topic Dirichlet '''
-        ''' T, top level truncation level '''
-        ''' K, second level truncation level '''
-        ''' size_vocab, size of vocab'''
-        ''' hdp_hyperparam, the hyperparameter of hdp '''
+    def __init__(self,
+                 T,
+                 K,
+                 D,
+                 W,
+                 eta,
+                 alpha,
+                 gamma,
+                 kappa,
+                 tau,
+                 scale=1.0,
+                 adding_noise=False):
+        """
+        this follows the convention of the HDP paper
+        gamma: first level concentration
+        alpha: second level concentration
+        eta: the topic Dirichlet
+        T: top level truncation level
+        K: second level truncation level
+        W: size of vocab
+        D: number of documents in the corpus
+        kappa: learning rate
+        tau: slow down parameter
+        """
 
-        self.m_hdp_hyperparam = hdp_hyperparam
-
+        self.m_W = W
+        self.m_D = D
         self.m_T = T
-        self.m_K = K  # for now, we assume all the same for the second level truncation
-        self.m_size_vocab = size_vocab
+        self.m_K = K
+        self.m_alpha = alpha
+        self.m_gamma = gamma
 
-        self.m_beta = np.random.gamma(1.0, 1.0, (T, size_vocab)) * D * 100 / (
-            T * size_vocab)
-        self.m_eta = eta
-
-        self.m_alpha = hdp_hyperparam.m_alpha_a / hdp_hyperparam.m_alpha_b
-        self.m_gamma = hdp_hyperparam.m_gamma_a / hdp_hyperparam.m_gamma_b
         self.m_var_sticks = np.zeros((2, T - 1))
         self.m_var_sticks[0] = 1.0
-        self.m_var_sticks[1] = self.m_gamma
+        #self.m_var_sticks[1] = self.m_gamma
+        # make a uniform at beginning
+        self.m_var_sticks[1] = list(range(T - 1, 0, -1))
 
-        # variational posterior parameters for hdp
-        self.m_var_gamma_a = hdp_hyperparam.m_gamma_a
-        self.m_var_gamma_b = hdp_hyperparam.m_gamma_b
+        self.m_varphi_ss = np.zeros(T)
 
-    def save_topics(self, filename):
-        f = open(filename, "w")
-        for beta in self.m_beta:
-            line = ' '.join([str(x) for x in beta])
-            f.write(line + '\n')
-        f.close()
+        self.m_lambda = np.random.gamma(1.0, 1.0,
+                                        (T, W)) * D * 100 / (T * W) - eta
+        self.m_eta = eta
+        self.m_Elogbeta = dirichlet_expectation(self.m_eta + self.m_lambda)
+
+        self.m_tau = tau + 1
+        self.m_kappa = kappa
+        self.m_scale = scale
+        self.m_updatect = 0
+        self.m_status_up_to_date = True
+        self.m_adding_noise = adding_noise
+        self.m_num_docs_parsed = 0
+
+        # Timestamps and normalizers for lazy updates
+        self.m_timestamp = np.zeros(self.m_W, dtype=int)
+        self.m_r = [0]
+        self.m_lambda_sum = np.sum(self.m_lambda, axis=1)
+
+    def process_documents(self,
+                          docs,
+                          var_converge,
+                          unseen_ids=None,
+                          update=True,
+                          opt_o=True):
+        if unseen_ids is None:
+            unseen_ids = []
+        # Find the unique words in this mini-batch of documents...
+        self.m_num_docs_parsed += len(docs)
+        adding_noise = False
+        adding_noise_point = min_adding_noise_point
+
+        if self.m_adding_noise:
+            if float(adding_noise_point) / len(docs) < min_adding_noise_ratio:
+                adding_noise_point = min_adding_noise_ratio * len(docs)
+
+            if self.m_num_docs_parsed % adding_noise_point == 0:
+                adding_noise = True
+
+        unique_words = dict()
+        word_list = []
+        if adding_noise:
+            word_list = list(range(self.m_W))
+            for w in word_list:
+                unique_words[w] = w
+        else:
+            for doc in docs:
+                for w in doc.words:
+                    if w not in unique_words:
+                        unique_words[w] = len(unique_words)
+                        word_list.append(w)
+        Wt = len(word_list)  # length of words in these documents
+
+        # ...and do the lazy updates on the necessary columns of lambda
+        rw = np.array([self.m_r[t] for t in self.m_timestamp[word_list]])
+        self.m_lambda[:, word_list] *= np.exp(self.m_r[-1] - rw)
+        self.m_Elogbeta[:, word_list] = \
+            sp.psi(self.m_eta + self.m_lambda[:, word_list]) - \
+            sp.psi(self.m_W*self.m_eta + self.m_lambda_sum[:, np.newaxis])
+
+        ss = suff_stats(self.m_T, Wt, len(docs))
+
+        Elogsticks_1st = expect_log_sticks(self.m_var_sticks)  # global sticks
+
+        # run variational inference on some new docs
+        score = 0.0
+        count = 0
+        unseen_score = 0.0
+        unseen_count = 0
+        for i, doc in enumerate(docs):
+            doc_score = self.doc_e_step(doc, ss, Elogsticks_1st, unique_words,
+                                        var_converge)
+            count += doc.total
+            score += doc_score
+            if i in unseen_ids:
+                unseen_score += doc_score
+                unseen_count += doc.total
+
+        if adding_noise:
+            print("adding noise at this stage...")
+
+            noise = np.random.gamma(1.0, 1.0, ss.m_var_beta_ss.shape)
+            noise_sum = np.sum(noise, axis=1)
+            ratio = np.sum(ss.m_var_beta_ss, axis=1) / noise_sum
+            noise = noise * ratio[:, np.newaxis]
+
+            mu = mu0 * 1000.0 / (self.m_updatect + 1000)
+
+            ss.m_var_beta_ss = ss.m_var_beta_ss * (1.0 - mu) + noise * mu
+
+        if update:
+            self.update_lambda(ss, word_list, opt_o)
+
+        return score, count, unseen_score, unseen_count
+
+    def optimal_ordering(self):
+        """
+        ordering the topics
+        """
+        idx = [i for i in reversed(np.argsort(self.m_lambda_sum))]
+        self.m_varphi_ss = self.m_varphi_ss[idx]
+        self.m_lambda = self.m_lambda[idx, :]
+        self.m_lambda_sum = self.m_lambda_sum[idx]
+        self.m_Elogbeta = self.m_Elogbeta[idx, :]
 
     def doc_e_step(self,
                    doc,
                    ss,
-                   Elogbeta,
                    Elogsticks_1st,
+                   unique_words,
                    var_converge,
-                   fresh=False):
+                   max_iter=100):
+        """
+        e step for a single doc
+        """
 
-        Elogbeta_doc = Elogbeta[:, doc.words]
+        batchids = [unique_words[id] for id in doc.words]
+
+        Elogbeta_doc = self.m_Elogbeta[:, doc.words]
+        # very similar to the hdp equations
         v = np.zeros((2, self.m_K - 1))
+        v[0] = 1.0
+        v[1] = self.m_alpha
 
-        phi = np.ones((doc.length, self.m_K)) * 1.0 / self.m_K
-
-        # the following line is of no use
+        # The following line is of no use.
         Elogsticks_2nd = expect_log_sticks(v)
 
-        likelihood = 0.0
-        old_likelihood = -1e1000
-        converge = 1.0
-        eps = 1e-100
+        # back to the uniform
+        phi = np.ones((len(doc.words), self.m_K)) * 1.0 / self.m_K
 
-        iter = 0
-        max_iter = 100
-        #(TODO): support second level optimization in the future
-        while iter < max_iter and (converge < 0.0 or converge > var_converge):
+        likelihood = 0.0
+        old_likelihood = -1e100
+        converge = 1.0
+
+        iteration = 0
+
+        # TODO: figure out what's going on with this, why is it used outside the loop?
+        var_phi = 0.0
+        # not yet support second level optimization yet, to be done in the future
+        while iteration < max_iter and (converge < 0.0
+                                        or converge > var_converge):
             ### update variational parameters
             # var_phi
-            if iter < 3 and fresh:
+            if iteration < 3:
                 var_phi = np.dot(phi.T, (Elogbeta_doc * doc.counts).T)
                 (log_var_phi, log_norm) = utils.log_normalize(var_phi)
                 var_phi = np.exp(log_var_phi)
@@ -231,8 +348,8 @@ class hdp:
                 (log_var_phi, log_norm) = utils.log_normalize(var_phi)
                 var_phi = np.exp(log_var_phi)
 
-        # phi
-            if iter < 3:
+            # phi
+            if iteration < 3:
                 phi = np.dot(var_phi, Elogbeta_doc).T
                 (log_phi, log_norm) = utils.log_normalize(phi)
                 phi = np.exp(log_phi)
@@ -273,151 +390,83 @@ class hdp:
             converge = (likelihood - old_likelihood) / abs(old_likelihood)
             old_likelihood = likelihood
 
-            if converge < 0:
+            if converge < -0.000001:
                 print("warning, likelihood is decreasing!")
 
-            iter += 1
+            iteration += 1
 
         # update the suff_stat ss
+        # this time it only contains information from one doc
         ss.m_var_sticks_ss += np.sum(var_phi, 0)
-        ss.m_var_beta_ss[:, doc.words] += np.dot(var_phi.T, phi.T * doc.counts)
+        ss.m_var_beta_ss[:, batchids] += np.dot(var_phi.T, phi.T * doc.counts)
 
-        return (likelihood)
+        return likelihood
 
-    def optimal_ordering(self, ss):
-        s = [(a, b)
-             for (a, b) in zip(ss.m_var_sticks_ss, list(range(self.m_T)))]
-        x = sorted(s, key=lambda y: y[0], reverse=True)
-        idx = [y[1] for y in x]
-        ss.m_var_sticks_ss[:] = ss.m_var_sticks_ss[idx]
-        ss.m_var_beta_ss[:] = ss.m_var_beta_ss[idx, :]
+    def update_lambda(self, sstats, word_list, opt_o):
 
-    def do_m_step(self, ss):
-        self.optimal_ordering(ss)
+        self.m_status_up_to_date = False
+        if len(word_list) == self.m_W:
+            self.m_status_up_to_date = True
+        # rhot will be between 0 and 1, and says how much to weight
+        # the information we got from this mini-batch.
+        rhot = self.m_scale * pow(self.m_tau + self.m_updatect, -self.m_kappa)
+        if rhot < rhot_bound:
+            rhot = rhot_bound
+        self.m_rhot = rhot
+
+        # Update appropriate columns of lambda based on documents.
+        self.m_lambda[:, word_list] = self.m_lambda[:, word_list] * (1-rhot) + \
+            rhot * self.m_D * sstats.m_var_beta_ss / sstats.m_batchsize
+        self.m_lambda_sum = (1-rhot) * self.m_lambda_sum+ \
+            rhot * self.m_D * np.sum(sstats.m_var_beta_ss, axis=1) / sstats.m_batchsize
+
+        self.m_updatect += 1
+        self.m_timestamp[word_list] = self.m_updatect
+        self.m_r.append(self.m_r[-1] + np.log(1 - rhot))
+
+        self.m_varphi_ss = (1.0-rhot) * self.m_varphi_ss + rhot * \
+               sstats.m_var_sticks_ss * self.m_D / sstats.m_batchsize
+
+        if opt_o:
+            self.optimal_ordering()
+
         ## update top level sticks
-        self.m_var_sticks[0] = ss.m_var_sticks_ss[:self.m_T - 1] + 1.0
-        var_phi_sum = np.flipud(ss.m_var_sticks_ss[1:])
+        self.m_var_sticks[0] = self.m_varphi_ss[:self.m_T - 1] + 1.0
+        var_phi_sum = np.flipud(self.m_varphi_ss[1:])
         self.m_var_sticks[1] = np.flipud(np.cumsum(var_phi_sum)) + self.m_gamma
 
-        ## update topic parameters
-        self.m_beta = self.m_eta + ss.m_var_beta_ss
+    def update_expectations(self):
+        """
+        Since we're doing lazy updates on lambda, at any given moment
+        the current state of lambda may not be accurate. This function
+        updates all of the elements of lambda and Elogbeta so that if (for
+        example) we want to print out the topics we've learned we'll get the
+        correct behavior.
+        """
+        for w in range(self.m_W):
+            self.m_lambda[:, w] *= np.exp(
+                self.m_r[-1] - self.m_r[self.m_timestamp[w]])
+        self.m_Elogbeta = sp.psi(self.m_eta + self.m_lambda) - \
+            sp.psi(self.m_W*self.m_eta + self.m_lambda_sum[:, np.newaxis])
+        self.m_timestamp[:] = self.m_updatect
+        self.m_status_up_to_date = True
 
-        if self.m_hdp_hyperparam.m_hyper_opt:
-            self.m_var_gamma_a = self.m_hdp_hyperparam.m_gamma_a + self.m_T - 1
-            dig_sum = sp.psi(np.sum(self.m_var_sticks, 0))
-            Elog1_W = sp.psi(self.m_var_sticks[1]) - dig_sum
-            self.m_var_gamma_b = self.m_hdp_hyperparam.m_gamma_b - np.sum(
-                Elog1_W)
-            self.m_gamma = hdp_hyperparam.m_gamma_a / hdp_hyperparam.m_gamma_b
-
-    def seed_init(self, c):
-        n = c.num_docs
-        ids = random.sample(list(range(n)), self.m_T)
-        print("seeding with docs %s" % (' '.join([str(id) for id in ids])))
-        for (id, t) in zip(ids, list(range(self.m_T))):
-            doc = c.docs[id]
-            self.m_beta[t] = np.random.gamma(1, 1, self.m_size_vocab)
-            self.m_beta[t, doc.words] += doc.counts
-
-    ## one iteration of the em
-    def em_on_large_data(self, filename, var_converge, fresh):
-        ss = suff_stats(self.m_T, self.m_size_vocab)
-        ss.set_zero()
-
-        # prepare all needs for a single doc
-        Elogbeta = dirichlet_expectation(self.m_beta)  # the topics
-        Elogsticks_1st = expect_log_sticks(self.m_var_sticks)  # global sticks
-        likelihood = 0.0
-        for line in open(filename):
-            doc = parse_line(line)
-            likelihood += self.doc_e_step(
-                doc, ss, Elogbeta, Elogsticks_1st, var_converge, fresh=fresh)
-
-        # collect the likelihood from other parts
-        # the prior for gamma
-        if self.m_hdp_hyperparam.m_hyper_opt:
-            log_gamma = sp.psi(self.m_var_gamma_a) - np.log(self.m_var_gamma_b)
-            likelihood += self.m_hdp_hyperparam.m_gamma_a * log(self.m_hdp_hyperparam.m_gamma_b) \
-                    - sp.gammaln(self.m_hdp_hyperparam.m_gamma_a)
-
-            likelihood -= self.m_var_gamma_a * log(self.m_var_gamma_b) \
-                    - sp.gammaln(self.m_var_gamma_a)
-
-            likelihood += (self.m_hdp_hyperparam.m_gamma_a - self.m_var_gamma_a) * log_gamma \
-                    - (self.m_hdp_hyperparam.m_gamma_b - self.m_var_gamma_b) * self.m_gamma
-        else:
-            log_gamma = np.log(self.m_gamma)
-
-    # the W/sticks part
-        likelihood += (self.m_T - 1) * log_gamma
-        dig_sum = sp.psi(np.sum(self.m_var_sticks, 0))
-        likelihood += np.sum((
-            np.array([1.0, self.m_gamma])[:, np.newaxis] - self.m_var_sticks) *
-                             (sp.psi(self.m_var_sticks) - dig_sum))
-        likelihood -= np.sum(sp.gammaln(np.sum(
-            self.m_var_sticks, 0))) - np.sum(sp.gammaln(self.m_var_sticks))
-
-        # the beta part
-        likelihood += np.sum((self.m_eta - self.m_beta) * Elogbeta)
-        likelihood += np.sum(sp.gammaln(self.m_beta) - sp.gammaln(self.m_eta))
-        likelihood += np.sum(
-            sp.gammaln(self.m_eta * self.m_size_vocab) -
-            sp.gammaln(np.sum(self.m_beta, 1)))
-
-        self.do_m_step(ss)  # run m step
-        return likelihood
-
-    ## one iteration of the em
-
-    def em(self, c, var_converge, fresh):
-        ss = suff_stats(self.m_T, self.m_size_vocab)
-        ss.set_zero()
-
-        # prepare all needs for a single doc
-        Elogbeta = dirichlet_expectation(self.m_beta)  # the topics
-        Elogsticks_1st = expect_log_sticks(self.m_var_sticks)  # global sticks
-        likelihood = 0.0
-        for doc in c.docs:
-            likelihood += self.doc_e_step(
-                doc, ss, Elogbeta, Elogsticks_1st, var_converge, fresh=fresh)
-
-        # collect the likelihood from other parts
-        # the prior for gamma
-        if self.m_hdp_hyperparam.m_hyper_opt:
-            log_gamma = sp.psi(self.m_var_gamma_a) - np.log(self.m_var_gamma_b)
-            likelihood += self.m_hdp_hyperparam.m_gamma_a * log(self.m_hdp_hyperparam.m_gamma_b) \
-                    - sp.gammaln(self.m_hdp_hyperparam.m_gamma_a)
-
-            likelihood -= self.m_var_gamma_a * log(self.m_var_gamma_b) \
-                    - sp.gammaln(self.m_var_gamma_a)
-
-            likelihood += (self.m_hdp_hyperparam.m_gamma_a - self.m_var_gamma_a) * log_gamma \
-                    - (self.m_hdp_hyperparam.m_gamma_b - self.m_var_gamma_b) * self.m_gamma
-        else:
-            log_gamma = np.log(self.m_gamma)
-
-    # the W/sticks part
-        likelihood += (self.m_T - 1) * log_gamma
-        dig_sum = sp.psi(np.sum(self.m_var_sticks, 0))
-        likelihood += np.sum((
-            np.array([1.0, self.m_gamma])[:, np.newaxis] - self.m_var_sticks) *
-                             (sp.psi(self.m_var_sticks) - dig_sum))
-        likelihood -= np.sum(sp.gammaln(np.sum(
-            self.m_var_sticks, 0))) - np.sum(sp.gammaln(self.m_var_sticks))
-
-        # the beta part
-        likelihood += np.sum((self.m_eta - self.m_beta) * Elogbeta)
-        likelihood += np.sum(sp.gammaln(self.m_beta) - sp.gammaln(self.m_eta))
-        likelihood += np.sum(
-            sp.gammaln(self.m_eta * self.m_size_vocab) -
-            sp.gammaln(np.sum(self.m_beta, 1)))
-
-        self.do_m_step(ss)  # run m step
-        return likelihood
+    def save_topics(self, filename):
+        if not self.m_status_up_to_date:
+            self.update_expectations()
+        f = open(filename, "w")
+        betas = self.m_lambda + self.m_eta
+        for beta in betas:
+            line = ' '.join([str(x) for x in beta])
+            f.write(line + '\n')
+        f.close()
 
     def hdp_to_lda(self):
         # compute the lda almost equivalent hdp.
         # alpha
+        if not self.m_status_up_to_date:
+            self.update_expectations()
+
         sticks = self.m_var_sticks[0] / (
             self.m_var_sticks[0] + self.m_var_sticks[1])
         alpha = np.zeros(self.m_T)
@@ -430,112 +479,13 @@ class hdp:
         #alpha = alpha * self.m_gamma
 
         # beta
-        beta_sum = np.sum(self.m_beta, axis=1)
-        beta = self.m_beta / beta_sum[:, np.newaxis]
+        beta = (self.m_lambda + self.m_eta) / (
+            self.m_W * self.m_eta + self.m_lambda_sum[:, np.newaxis])
 
-        return (alpha, beta)
+        return alpha, beta
 
-    def em_with_testing(self,
-                        c,
-                        max_iter,
-                        var_converge,
-                        max_time,
-                        directory,
-                        c_test,
-                        split_ratio,
-                        seeded=True):
-        ## the em style inference
-        if seeded:
-            self.seed_init(c)
-
-        ss = suff_stats(self.m_T, self.m_size_vocab)
-
-        likelihood = 0.0
-        old_likelihood = 0.0
-        converge = 1.0
-
-        out_predict = open('%s/hdp.predict' % directory, "w")
-
-        iter = 0
-        totaltime = 0.0
-        while (max_iter == -1 or iter < max_iter) and totaltime < max_time:
-
-            t0 = time.clock()
-            # prepare all needs for a single doc
-            Elogbeta = dirichlet_expectation(self.m_beta)  # the topics
-            Elogsticks_1st = expect_log_sticks(
-                self.m_var_sticks)  # global sticks
-            ss.set_zero()
-            likelihood = 0.0
-            for doc in c.docs:
-                likelihood += self.doc_e_step(
-                    doc,
-                    ss,
-                    Elogbeta,
-                    Elogsticks_1st,
-                    var_converge,
-                    fresh=(iter == 0))
-
-            # collect the likelihood from other parts
-            # the prior for gamma
-            if self.m_hdp_hyperparam.m_hyper_opt:
-                log_gamma = sp.psi(self.m_var_gamma_a) - np.log(
-                    self.m_var_gamma_b)
-                likelihood += self.m_hdp_hyperparam.m_gamma_a * log(self.m_hdp_hyperparam.m_gamma_b) \
-                        - sp.gammaln(self.m_hdp_hyperparam.m_gamma_a)
-
-                likelihood -= self.m_var_gamma_a * log(self.m_var_gamma_b) \
-                        - sp.gammaln(self.m_var_gamma_a)
-
-                likelihood += (self.m_hdp_hyperparam.m_gamma_a - self.m_var_gamma_a) * log_gamma \
-                        - (self.m_hdp_hyperparam.m_gamma_b - self.m_var_gamma_b) * self.m_gamma
-            else:
-                log_gamma = np.log(self.m_gamma)
-
-        # the W/sticks part
-            likelihood += (self.m_T - 1) * log_gamma
-            dig_sum = sp.psi(np.sum(self.m_var_sticks, 0))
-            likelihood += np.sum(
-                (np.array([1.0, self.m_gamma])[:, np.newaxis] -
-                 self.m_var_sticks) * (sp.psi(self.m_var_sticks) - dig_sum))
-            likelihood -= np.sum(sp.gammaln(np.sum(
-                self.m_var_sticks, 0))) - np.sum(
-                    sp.gammaln(self.m_var_sticks))
-
-            # the beta part
-            likelihood += np.sum((self.m_eta - self.m_beta) * Elogbeta)
-            likelihood += np.sum(
-                sp.gammaln(self.m_beta) - sp.gammaln(self.m_eta))
-            likelihood += np.sum(
-                sp.gammaln(self.m_eta * self.m_size_vocab) -
-                sp.gammaln(np.sum(self.m_beta, 1)))
-
-            if iter > 0:
-                converge = (likelihood - old_likelihood) / abs(old_likelihood)
-            old_likelihood = likelihood
-
-            print("iter = %d, likelihood = %f, converge = %f" %
-                  (iter, likelihood, converge))
-
-            if converge < 0:
-                print("warning, likelihood is decreasing!")
-
-            self.do_m_step(ss)  # run m step
-            iter += 1  # increase the iter counter
-
-            totaltime += time.clock() - t0
-            (score, nwords) = self.infer_only(
-                c_test.docs,
-                half_train_half_test=True,
-                split_ratio=split_ratio)
-            out_predict.write("%f %f\n" % (totaltime, score / nwords))
-            out_predict.flush()
-        out_predict.close()
-
-    def infer_only(self, docs, half_train_half_test=False, split_ratio=0.5):
-        #Elogbeta = dirichlet_expectation(self.m_beta) # the topics
-        Elogbeta = np.log(self.m_beta) - np.log(np.sum(self.m_beta,
-                                                       1))[:, np.newaxis]
+    def infer_only(self, docs, half_train_half_test=False, split_ratio=0.9):
+        # be sure to run update_expectations()
         sticks = self.m_var_sticks[0] / (
             self.m_var_sticks[0] + self.m_var_sticks[1])
         alpha = np.zeros(self.m_T)
@@ -544,18 +494,16 @@ class hdp:
             alpha[i] = sticks[i] * left
             left = left - alpha[i]
         alpha[self.m_T - 1] = left
-        alpha = alpha * self.m_alpha
         #alpha = alpha * self.m_gamma
         score = 0.0
         count = 0.0
         for doc in docs:
             if half_train_half_test:
-                (s, c, gamma) = lda_e_step_half(doc, alpha, Elogbeta,
+                (s, c, gamma) = lda_e_step_half(doc, alpha, self.m_Elogbeta,
                                                 split_ratio)
                 score += s
                 count += c
             else:
-                (s, gamma) = lda_e_step(doc, alpha, Elogbeta)
-                score += s
+                score += lda_e_step(doc, alpha, np.exp(self.m_Elogbeta))
                 count += doc.total
-        return (score, count)
+        return score, count

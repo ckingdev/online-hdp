@@ -5,7 +5,7 @@ import re
 # read and organize data
 
 
-#3 2:3 4:5 5:3 --- document info (word: count)
+# 3 2:3 4:5 5:3 --- document info (word: count)
 class document:
     ''' the class for a single document '''
 
@@ -16,7 +16,7 @@ class document:
         self.total = 0
 
 
-class corpus:
+class Corpus:
     ''' the class for the whole corpus'''
 
     def __init__(self):
@@ -32,12 +32,13 @@ class corpus:
 
         for line in open(filename):
             ss = line.strip().split()
-            if len(ss) == 0: continue
+            if len(ss) == 0:
+                continue
             doc = document()
             doc.length = int(ss[0])
 
-            doc.words = [0 for w in range(doc.length)]
-            doc.counts = [0 for w in range(doc.length)]
+            doc.words = [0] * doc.length
+            doc.counts = [0] * doc.length
             for w, pair in enumerate(re.finditer(r"(\d+):(\d+)", line)):
                 doc.words[w] = int(pair.group(1))
                 doc.counts[w] = int(pair.group(2))
@@ -53,14 +54,8 @@ class corpus:
         print("finished reading %d docs." % self.num_docs)
 
 
-# def read_data(filename):
-#     c = corpus()
-#     c.read_data(filename)
-#     return c
-
-
 def read_stream_data(f, num_docs):
-    c = corpus()
+    c = Corpus()
     splitexp = re.compile(r'[ :]')
     for i in range(num_docs):
         line = f.readline()
@@ -83,7 +78,7 @@ def read_stream_data(f, num_docs):
 
 # This version is about 33% faster
 def read_data(filename):
-    c = corpus()
+    c = Corpus()
     splitexp = re.compile(r'[ :]')
     for line in open(filename):
         d = document()

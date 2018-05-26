@@ -1,13 +1,12 @@
-import sys, os
-from corpus import *
-import onlinehdp
+import os
+from onlinehdp import hdp, corpus
 import pickle
-import random, time
-from numpy import cumsum, sum
+import random
+import time
+from numpy import sum
 
 from optparse import OptionParser
 from glob import glob
-np = onlinehdp.np
 
 
 def parse_args():
@@ -34,7 +33,6 @@ def parse_args():
         directory=None,
         save_lag=500,
         pass_ratio=0.5,
-        new_init=False,
         scale=1.0,
         adding_noise=False,
         seq_mode=False,
@@ -119,11 +117,6 @@ def parse_args():
         dest="pass_ratio",
         help="The pass ratio for each split of training data [0.5]")
     parser.add_option(
-        "--new_init",
-        action="store_true",
-        dest="new_init",
-        help="use new init or not")
-    parser.add_option(
         "--scale",
         type="float",
         dest="scale",
@@ -166,18 +159,18 @@ def run_online_hdp():
         # cur_chosen_split = int(random.random() * num_train_splits)
         cur_chosen_split = 0  # deterministic choice
         cur_train_filename = train_filenames[cur_chosen_split]
-        c_train = read_data(cur_train_filename)
+        c_train = corpus.read_data(cur_train_filename)
 
     if options.test_data_path is not None:
         test_data_path = options.test_data_path
-        c_test = read_data(test_data_path)
+        c_test = corpus.read_data(test_data_path)
         c_test_word_count = sum([doc.total for doc in c_test.docs])
 
     if options.test_data_path_in_folds is not None:
         test_data_path_in_folds = options.test_data_path_in_folds
         test_data_in_folds_filenames = glob(test_data_path_in_folds)
         test_data_in_folds_filenames.sort()
-        num_folds = len(test_data_in_folds_filenames) / 2
+        num_folds = len(test_data_in_folds_filenames) // 2
         test_data_train_filenames = []
         test_data_test_filenames = []
 
@@ -188,10 +181,11 @@ def run_online_hdp():
                 test_data_in_folds_filenames[2 * i])
 
         c_test_train_folds = [
-            read_data(filename) for filename in test_data_train_filenames
+            corpus.read_data(filename)
+            for filename in test_data_train_filenames
         ]
         c_test_test_folds = [
-            read_data(filename) for filename in test_data_test_filenames
+            corpus.read_data(filename) for filename in test_data_test_filenames
         ]
 
     result_directory = "%s/corpus-%s-kappa-%.1f-tau-%.f-batchsize-%d" % (
@@ -207,12 +201,10 @@ def run_online_hdp():
     options_file.close()
 
     print("creating online hdp instance.")
-    ohdp = onlinehdp.online_hdp(options.T, options.K, options.D, options.W,
-                                options.eta, options.alpha, options.gamma,
-                                options.kappa, options.tau, options.scale,
-                                options.adding_noise)
-    if options.new_init:
-        ohdp.new_init(c_train)
+    ohdp = hdp.online_hdp(options.T, options.K, options.D, options.W,
+                          options.eta, options.alpha, options.gamma,
+                          options.kappa, options.tau, options.scale,
+                          options.adding_noise)
 
     print("setting up counters and log files.")
 
@@ -243,7 +235,7 @@ def run_online_hdp():
         # Sample the documents.
         batchsize = options.batchsize
         if options.seq_mode:
-            c = read_stream_data(train_file, batchsize)
+            c = corpus.read_stream_data(train_file, batchsize)
             batchsize = c.num_docs
             if batchsize == 0:
                 break
@@ -294,10 +286,10 @@ def run_online_hdp():
                 test_score_split = 0.0
                 c_test_word_count_split = 0
                 for doc in c_test.docs:
-                    (likelihood, gamma) = onlinehdp.lda_e_step(
+                    (likelihood, gamma) = hdp.lda_e_step(
                         doc, lda_alpha, lda_beta)
                     test_score += likelihood
-                    (likelihood, count, gamma) = onlinehdp.lda_e_step_split(
+                    (likelihood, count, gamma) = hdp.lda_e_step_split(
                         doc, lda_alpha, lda_beta)
                     test_score_split += likelihood
                     c_test_word_count_split += count
@@ -317,7 +309,7 @@ def run_online_hdp():
                 # cur_chosen_split = int(random.random() * num_train_splits)
                 cur_chosen_split = (cur_chosen_split + 1) % num_train_splits
                 cur_train_filename = train_filenames[cur_chosen_split]
-                c_train = read_data(cur_train_filename)
+                c_train = corpus.read_data(cur_train_filename)
 
         if (options.max_iter != -1 and iter > options.max_iter) or (
                 options.max_time != -1 and total_time > options.max_time):
@@ -339,10 +331,9 @@ def run_online_hdp():
         test_score_split = 0.0
         c_test_word_count_split = 0
         for doc in c_test.docs:
-            (likelihood, gamma) = onlinehdp.lda_e_step(doc, lda_alpha,
-                                                       lda_beta)
+            (likelihood, gamma) = hdp.lda_e_step(doc, lda_alpha, lda_beta)
             test_score += likelihood
-            (likelihood, count, gamma) = onlinehdp.lda_e_step_split(
+            (likelihood, count, gamma) = hdp.lda_e_step_split(
                 doc, lda_alpha, lda_beta)
             test_score_split += likelihood
             c_test_word_count_split += count

@@ -21,17 +21,15 @@ def log_normalize(v):
         log_norm = np.log(tot) - log_shift
         v = v - log_norm[:, np.newaxis]
 
-    return (v, log_norm)
+    return v, log_norm
 
 
 def log_sum(log_a, log_b):
     ''' we know log(a) and log(b), compute log(a+b) '''
-    v = 0.0
-    if (log_a < log_b):
-        v = log_b + np.log(1 + np.exp(log_a - log_b))
-    else:
-        v = log_a + np.log(1 + np.exp(log_b - log_a))
-    return v
+    # TODO: simplify this- might be able to get rid of branch.
+    if log_a < log_b:
+        return log_b + np.log(1 + np.exp(log_a - log_b))
+    return log_a + np.log(1 + np.exp(log_b - log_a))
 
 
 def argmax(x):
