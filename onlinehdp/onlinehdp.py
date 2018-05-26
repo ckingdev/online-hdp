@@ -492,7 +492,7 @@ class online_hdp:
     def save_topics(self, filename):
         if not self.m_status_up_to_date:
             self.update_expectations()
-        f = file(filename, "w")
+        f = open(filename, "w")
         betas = self.m_lambda + self.m_eta
         for beta in betas:
             line = ' '.join([str(x) for x in beta])

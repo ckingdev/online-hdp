@@ -155,7 +155,7 @@ def run_online_hdp():
     # Set the random seed.
     random.seed(options.random_seed)
     if options.seq_mode:
-        train_file = file(options.data_path)
+        train_file = open(options.data_path)
     else:
         train_filenames = glob(options.data_path)
         train_filenames.sort()
@@ -201,7 +201,7 @@ def run_online_hdp():
     if not os.path.isdir(result_directory):
         os.makedirs(result_directory)
 
-    options_file = file("%s/options.dat" % result_directory, "w")
+    options_file = open("%s/options.dat" % result_directory, "w")
     for opt, value in list(options.__dict__.items()):
         options_file.write(str(opt) + " " + str(value) + "\n")
     options_file.close()
@@ -222,13 +222,13 @@ def run_online_hdp():
     total_doc_count = 0
     split_doc_count = 0
     doc_seen = set()
-    log_file = file("%s/log.dat" % result_directory, "w")
+    log_file = open("%s/log.dat" % result_directory, "w")
     log_file.write(
         "iteration time doc.count score word.count unseen.score unseen.word.count\n"
     )
 
     if options.test_data_path is not None:
-        test_log_file = file("%s/test-log.dat" % result_directory, "w")
+        test_log_file = open("%s/test-log.dat" % result_directory, "w")
         test_log_file.write(
             "iteration time doc.count score word.count score.split word.count.split\n"
         )
@@ -282,8 +282,8 @@ def run_online_hdp():
             ohdp.save_topics('%s/doc_count-%d.topics' % (result_directory,
                                                          total_doc_count))
             pickle.dump(ohdp,
-                        file('%s/doc_count-%d.model' %
-                             (result_directory, total_doc_count), 'w'), -1)
+                        open('%s/doc_count-%d.model' %
+                             (result_directory, total_doc_count), 'wb'), -1)
 
             if options.test_data_path is not None:
                 print("\tworking on predictions.")
@@ -326,7 +326,7 @@ def run_online_hdp():
 
     print("Saving the final model and topics.")
     ohdp.save_topics('%s/final.topics' % result_directory)
-    pickle.dump(ohdp, file('%s/final.model' % result_directory, 'w'), -1)
+    pickle.dump(ohdp, open('%s/final.model' % result_directory, 'wb'), -1)
 
     if options.seq_mode:
         train_file.close()

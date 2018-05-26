@@ -30,7 +30,7 @@ class corpus:
             return
         print('reading data from %s.' % filename)
 
-        for line in file(filename):
+        for line in open(filename):
             ss = line.strip().split()
             if len(ss) == 0: continue
             doc = document()

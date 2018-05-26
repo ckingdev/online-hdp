@@ -188,7 +188,7 @@ class hdp:
         self.m_var_gamma_b = hdp_hyperparam.m_gamma_b
 
     def save_topics(self, filename):
-        f = file(filename, "w")
+        f = open(filename, "w")
         for beta in self.m_beta:
             line = ' '.join([str(x) for x in beta])
             f.write(line + '\n')
@@ -328,7 +328,7 @@ class hdp:
         Elogbeta = dirichlet_expectation(self.m_beta)  # the topics
         Elogsticks_1st = expect_log_sticks(self.m_var_sticks)  # global sticks
         likelihood = 0.0
-        for line in file(filename):
+        for line in open(filename):
             doc = parse_line(line)
             likelihood += self.doc_e_step(
                 doc, ss, Elogbeta, Elogsticks_1st, var_converge, fresh=fresh)
@@ -454,7 +454,7 @@ class hdp:
         old_likelihood = 0.0
         converge = 1.0
 
-        out_predict = file('%s/hdp.predict' % directory, "w")
+        out_predict = open('%s/hdp.predict' % directory, "w")
 
         iter = 0
         totaltime = 0.0

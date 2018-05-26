@@ -131,7 +131,7 @@ def run_hdp():
     if not os.path.isdir(result_directory):
         os.makedirs(result_directory)
 
-    options_file = file("%s/options.dat" % result_directory, "w")
+    options_file = open("%s/options.dat" % result_directory, "w")
     for opt, value in list(options.__dict__.items()):
         options_file.write(str(opt) + " " + str(value) + "\n")
     options_file.close()
@@ -154,10 +154,10 @@ def run_hdp():
     old_likelihood = 0.0
     converge = 1.0
 
-    log_file = file("%s/log.dat" % result_directory, "w")
+    log_file = open("%s/log.dat" % result_directory, "w")
     log_file.write("iteration time doc.count likelihood\n")
 
-    test_log_file = file("%s/test-log.dat" % result_directory, "w")
+    test_log_file = open("%s/test-log.dat" % result_directory, "w")
     test_log_file.write(
         "iteration time doc.count score word.count score.split word.count.split\n"
     )
@@ -188,8 +188,8 @@ def run_hdp():
         bhdp.save_topics('%s/doc_count-%d.topics' % (result_directory,
                                                      total_doc_count))
         pickle.dump(bhdp,
-                    file('%s/doc_count-%d.model' % (result_directory,
-                                                    total_doc_count), 'w'), -1)
+                    open('%s/doc_count-%d.model' %
+                         (result_directory, total_doc_count), 'wb'), -1)
 
         print("\tworking on predictions.")
         (lda_alpha, lda_beta) = bhdp.hdp_to_lda()
@@ -215,7 +215,7 @@ def run_hdp():
 
         # prediction on the test set in the folds
     # print "\tworking on test data in folds."
-    # test_folds_log_file = file("%s/doc_count-%d.test.folds" % (result_directory, total_doc_count), "w")
+    # test_folds_log_file = open("%s/doc_count-%d.test.folds" % (result_directory, total_doc_count), "w")
     # test_folds_log_file.write("fold doc.id word count score\n")
     # for i in range(num_folds):
     #   train_data = c_test_train_folds[i]
@@ -235,7 +235,7 @@ def run_hdp():
 
     print("Saving the final model and topics.")
     bhdp.save_topics('%s/final.topics' % result_directory)
-    pickle.dump(bhdp, file('%s/final.model' % result_directory, 'w'), -1)
+    pickle.dump(bhdp, open('%s/final.model' % result_directory, 'wb'), -1)
 
     (lda_alpha, lda_beta) = bhdp.hdp_to_lda()
 
